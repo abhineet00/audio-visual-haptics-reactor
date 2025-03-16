@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sound-Interactive Particles with Level Bar</title>
+    <title>Interactive Particles with Sound</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
       body {
@@ -13,6 +13,19 @@
       }
       canvas {
         display: block;
+      }
+      #startButton {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 15px 30px;
+        font-size: 18px;
+        background: rgb(21, 155, 173);
+        color: white;
+        border: none;
+        cursor: pointer;
+        border-radius: 8px;
       }
       #soundBar {
         position: fixed;
@@ -34,17 +47,21 @@
     </style>
   </head>
   <body>
-    <div id="soundBar">
+    <button id="startButton">Click to Start</button>
+    <div id="soundBar" style="display: none">
       <div id="soundFill"></div>
     </div>
 
     <script>
-      let scene, camera, renderer, particles, analyser, dataArray;
+      let scene, camera, renderer, particles, analyser, dataArray, audioContext;
       const particleCount = 800;
       const soundFill = document.getElementById("soundFill");
+      const startButton = document.getElementById("startButton");
 
-      async function init() {
-        // Three.js Setup
+      function init() {
+        startButton.style.display = "none";
+        document.getElementById("soundBar").style.display = "block";
+
         scene = new THREE.Scene();
         camera = new THREE.PerspectiveCamera(
           75,
@@ -56,6 +73,8 @@
         renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
         document.body.appendChild(renderer.domElement);
+        const textureLoader = new THREE.TextureLoader();
+        const particleTexture = textureLoader.load("1.png");
 
         // Particles
         const geometry = new THREE.BufferGeometry();
@@ -73,70 +92,107 @@
         );
         geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
 
-        const material = new THREE.PointsMaterial({
+        const particlesMaterial = new THREE.PointsMaterial({
           vertexColors: true,
           size: 0.1,
         });
-        particles = new THREE.Points(geometry, material);
+        particlesMaterial.size = 0.4;
+        particlesMaterial.sizeAttenuation = true;
+
+        particlesMaterial.color = new THREE.Color("#ff88cc");
+
+        particlesMaterial.transparent = true;
+        particlesMaterial.alphaMap = particleTexture;
+        // particlesMaterial.alphaTest = 0.01
+        // particlesMaterial.depthTest = false
+        particlesMaterial.depthWrite = false;
+        particlesMaterial.blending = THREE.AdditiveBlending;
+
+        particlesMaterial.vertexColors = true;
+        particles = new THREE.Points(geometry, particlesMaterial);
         scene.add(particles);
 
-        // Microphone Audio Setup
+        setupAudio()
+          .then(() => {
+            animate();
+          })
+          .catch((err) => {
+            console.error("Audio setup failed:", err);
+            alert("Enable microphone for interactivity.");
+          });
+      }
+
+      async function setupAudio() {
         try {
-          const audioContext = new (window.AudioContext ||
+          audioContext = new (window.AudioContext ||
             window.webkitAudioContext)();
+          await audioContext.resume();
+
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: true,
           });
           const source = audioContext.createMediaStreamSource(stream);
           analyser = audioContext.createAnalyser();
-          analyser.fftSize = 256;
+          analyser.fftSize = 128;
           source.connect(analyser);
           dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+          console.log("Microphone access granted.");
         } catch (err) {
           console.error("Microphone access denied:", err);
-          alert("Enable microphone for interactivity.");
-          return;
+          alert("Please allow microphone access.");
         }
-
-        animate();
       }
 
       function animate() {
         requestAnimationFrame(animate);
+        if (!analyser) return;
+
         analyser.getByteFrequencyData(dataArray);
 
         let intensity =
-          dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length / 255;
+          dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length / 250;
+        intensity = Math.min(1, intensity * 1.5);
 
-        // Update Sound Bar
         soundFill.style.width = `${intensity * 100}%`;
 
         const positions = particles.geometry.attributes.position.array;
         const colors = particles.geometry.attributes.color.array;
 
         for (let i = 0; i < positions.length; i += 3) {
-          positions[i] += (Math.random() - 0.5) * intensity * 2;
-          positions[i + 1] += (Math.random() - 0.5) * intensity * 2;
-          positions[i + 2] += (Math.random() - 0.5) * intensity * 2;
+          positions[i] += (Math.random() - 0.5) * intensity * 3;
+          positions[i + 1] += (Math.random() - 0.5) * intensity * 3;
+          positions[i + 2] += (Math.random() - 0.5) * intensity * 3;
+
+          let distance = Math.sqrt(
+            positions[i] ** 2 + positions[i + 1] ** 2 + positions[i + 2] ** 2
+          );
+          if (distance > 20) {
+            positions[i] = (Math.random() - 0.5) * 5;
+            positions[i + 1] = (Math.random() - 0.5) * 5;
+            positions[i + 2] = (Math.random() - 0.5) * 5;
+          }
 
           colors[i] = intensity;
           colors[i + 1] = 1 - intensity;
           colors[i + 2] = Math.sin(intensity * Math.PI);
         }
-
+        if ("vibrate" in navigator && intensity > 0.5) {
+          navigator.vibrate(100);
+        }
         particles.geometry.attributes.position.needsUpdate = true;
         particles.geometry.attributes.color.needsUpdate = true;
 
         renderer.render(scene, camera);
       }
 
+      startButton.addEventListener("click", init);
+
       window.addEventListener("resize", () => {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
       });
-
-      init();
     </script>
   </body>
 </html>
